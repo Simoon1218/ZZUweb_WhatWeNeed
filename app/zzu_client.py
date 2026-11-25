@@ -40,6 +40,18 @@ class ZZUTokenError(ZZUApiError):
         super().__init__(message, status_code=401)
 
 
+class ZZUMFARequiredError(ZZUApiError):
+    def __init__(
+        self,
+        message: str = "郑州大学认证中心要求进行二次验证（MFA）",
+        mfa_state: str = "",
+        mfa_data: dict[str, Any] | None = None,
+    ):
+        super().__init__(message, status_code=428)
+        self.mfa_state = mfa_state
+        self.mfa_data = mfa_data or {}
+
+
 def utc_plus_8() -> datetime:
     return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8)))
 
@@ -145,32 +157,216 @@ class ZZUClient:
         return data
 
     # ------------------------------------------------------------------
-    # Unified Authentication
+    # Unified Authentication (with Supwisdom MFA detection & verification)
     # ------------------------------------------------------------------
-    def login(self, username: str, password: str) -> str:
-        path = "/password/passwordLogin"
-        headers = {
+    APP_ID = "com.lantu.MobileCampus.zzu"
+    CLIENT_ID = "477e40a75443827bf1e1fc9eee94f561"
+    DEFAULT_DEVICE_ID = "79C26735-C663-4708-9C69-8108E2E9ECD8"
+
+    def _token_headers(self) -> dict[str, str]:
+        return {
             "Content-Type": "application/x-www-form-urlencoded",
             "Connection": "keep-alive",
-            "X-Device-Infos": "packagename=com.lantu.MobileCampus.zzu;version=2.3.2;system=iOS",
+            "X-Device-Infos": f"packagename={self.APP_ID};version=2.3.2;system=iOS",
             "Accept": "application/json",
             "User-Agent": "SWSuperApp/2.3.2 (iPhone; iOS 17.0.2; Scale/3.00)",
             "Accept-Language": "zh-CN",
             "Accept-Encoding": "gzip, deflate, br",
         }
+
+    def detect_mfa(
+        self,
+        username: str,
+        password: str,
+        device_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Call Supwisdom /mfa/detect before /password/passwordLogin to obtain mfaState."""
+        dev_id = (device_id or "").strip() or self.DEFAULT_DEVICE_ID
         body = {
-            "appId": "com.lantu.MobileCampus.zzu",
-            "clientId": "477e40a75443827bf1e1fc9eee94f561",
-            "deviceId": "79C26735-C663-4708-9C69-8108E2E9ECD8",
-            "mfaState": "",
+            "appId": self.APP_ID,
+            "clientId": self.CLIENT_ID,
+            "deviceId": dev_id,
             "osType": "iOS",
             "password": password,
             "username": username,
         }
-        resp = self._request("POST", self.TOKEN_HOST + path, headers=headers, data=body)
+        headers = self._token_headers()
+
+        # Try standard POST /mfa/detect first
+        resp = self._request(
+            "POST",
+            self.TOKEN_HOST + "/mfa/detect",
+            headers=headers,
+            data=body,
+        )
+        if resp.status_code == 404 or resp.status_code == 405:
+            resp = self._request(
+                "GET",
+                self.TOKEN_HOST + "/mfa/detect",
+                headers=headers,
+                params={
+                    "username": username,
+                    "deviceId": dev_id,
+                    "appId": self.APP_ID,
+                },
+            )
+
         payload = self._parse_json(resp)
         if int(payload.get("code", -1)) != 0:
-            raise ZZULoginError(payload.get("message") or "学号或密码错误")
+            raise ZZULoginError(payload.get("message") or "MFA 检测失败，请检查学号或密码")
+
+        data = payload.get("data") or {}
+        if not isinstance(data, dict):
+            data = {}
+        return {
+            "need": bool(data.get("need", False)),
+            "state": str(data.get("state") or data.get("mfaState") or ""),
+            "raw": data,
+        }
+
+    def init_mfa_sms(self, mfa_state: str, mfa_type: str = "securephone") -> dict[str, Any]:
+        """Initialize MFA challenge (e.g., securephone SMS) and attempt to dispatch OTP."""
+        headers = self._token_headers()
+        init_resp = self._request(
+            "GET",
+            f"{self.TOKEN_HOST}/mfa/initByType/{mfa_type}",
+            headers=headers,
+            params={"state": mfa_state},
+        )
+        init_payload = self._parse_json(init_resp)
+        if int(init_payload.get("code", -1)) != 0:
+            raise ZZUApiError(
+                init_payload.get("message") or "初始化二次验证失败",
+                status_code=400,
+            )
+
+        data = init_payload.get("data") or {}
+        gid = ""
+        if isinstance(data, dict):
+            gid = str(data.get("gid") or data.get("id") or "")
+
+        # Attempt to trigger SMS sending if gid is present
+        send_result: dict[str, Any] = {}
+        if gid:
+            for send_url in (
+                f"{self.TOKEN_HOST}/mfa/send",
+                f"{self.TOKEN_HOST}/attest/api/guard/{mfa_type}/send",
+            ):
+                try:
+                    s_resp = self._request(
+                        "POST",
+                        send_url,
+                        headers=headers,
+                        data={"gid": gid, "state": mfa_state},
+                    )
+                    if s_resp.status_code < 400:
+                        send_result = self._parse_json(s_resp)
+                        break
+                except ZZUApiError:
+                    continue
+
+        return {
+            "gid": gid,
+            "state": mfa_state,
+            "init_data": data,
+            "send_result": send_result,
+        }
+
+    def verify_mfa_code(
+        self,
+        mfa_state: str,
+        code: str,
+        gid: str = "",
+        mfa_type: str = "securephone",
+    ) -> dict[str, Any]:
+        """Verify SMS/OTP code for Supwisdom MFA."""
+        headers = self._token_headers()
+        last_err = "验证码校验失败"
+        for verify_url in (
+            f"{self.TOKEN_HOST}/mfa/valid",
+            f"{self.TOKEN_HOST}/mfa/verify",
+            f"{self.TOKEN_HOST}/attest/api/guard/{mfa_type}/valid",
+        ):
+            try:
+                resp = self._request(
+                    "POST",
+                    verify_url,
+                    headers=headers,
+                    data={
+                        "gid": gid,
+                        "state": mfa_state,
+                        "code": code.strip(),
+                    },
+                )
+                if resp.status_code >= 400:
+                    continue
+                payload = self._parse_json(resp)
+                if int(payload.get("code", -1)) == 0 or payload.get("success"):
+                    return payload
+                last_err = payload.get("message") or last_err
+            except ZZUApiError as exc:
+                last_err = exc.message
+        raise ZZULoginError(last_err)
+
+    def login(
+        self,
+        username: str,
+        password: str,
+        mfa_state: str = "",
+        device_id: str | None = None,
+    ) -> str:
+        dev_id = (device_id or "").strip() or self.DEFAULT_DEVICE_ID
+        resolved_mfa_state = mfa_state.strip()
+        detect_info: dict[str, Any] = {}
+
+        # Step 1: If caller did not already provide a verified mfa_state, run /mfa/detect
+        if not resolved_mfa_state:
+            try:
+                detect_info = self.detect_mfa(username, password, device_id=dev_id)
+                resolved_mfa_state = detect_info.get("state", "")
+                if detect_info.get("need"):
+                    raise ZZUMFARequiredError(
+                        message="郑州大学认证检测到新设备/异地登录，需要完成短信二次验证（或改用 UserToken 登录）。",
+                        mfa_state=resolved_mfa_state,
+                        mfa_data=detect_info.get("raw") or {},
+                    )
+            except ZZUMFARequiredError:
+                raise
+            except ZZUApiError:
+                # If /mfa/detect itself fails unexpectedly, still attempt passwordLogin below
+                # so upstream returns the authoritative error.
+                pass
+
+        # Step 2: /password/passwordLogin with resolved mfaState
+        path = "/password/passwordLogin"
+        body = {
+            "appId": self.APP_ID,
+            "clientId": self.CLIENT_ID,
+            "deviceId": dev_id,
+            "mfaState": resolved_mfa_state,
+            "osType": "iOS",
+            "password": password,
+            "username": username,
+        }
+        resp = self._request(
+            "POST",
+            self.TOKEN_HOST + path,
+            headers=self._token_headers(),
+            data=body,
+        )
+        payload = self._parse_json(resp)
+        if int(payload.get("code", -1)) != 0:
+            msg = str(payload.get("message") or "学号或密码错误")
+            if "mfa" in msg.lower():
+                raise ZZUMFARequiredError(
+                    message=(
+                        f"上游返回 {msg}：郑州大学认证中心拦截了无二次验证的登录请求。"
+                        "请尝试短信二次验证，或在「UserToken 登录」页粘贴移动校园 idToken 登录。"
+                    ),
+                    mfa_state=resolved_mfa_state,
+                    mfa_data={"upstream_message": msg, "detect": detect_info},
+                )
+            raise ZZULoginError(msg)
 
         id_token = (payload.get("data") or {}).get("idToken")
         if not id_token:

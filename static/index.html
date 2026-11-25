@@ -42,6 +42,20 @@
           <textarea id="login-token" name="user_token" rows="3" placeholder="粘贴已获取的 idToken / UserToken"></textarea>
         </label>
 
+        <div id="mfa-box" class="notice-box hidden">
+          <div id="mfa-message" style="margin-bottom: 10px;"></div>
+          <div id="mfa-sms-controls" class="stack-form hidden">
+            <div style="display:flex; gap:8px;">
+              <input id="mfa-code" type="text" placeholder="输入短信验证码" style="flex:1;" />
+              <button type="button" id="mfa-send-btn" class="btn btn-secondary btn-sm">发送验证码</button>
+            </div>
+            <button type="button" id="mfa-verify-btn" class="btn btn-primary btn-block">验证并完成登录</button>
+          </div>
+          <button type="button" id="mfa-switch-token-btn" class="btn btn-ghost btn-sm" style="margin-top:8px; width:100%;">
+            改用 UserToken 登录 →
+          </button>
+        </div>
+
         <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">登录进入校园站</button>
       </form>
 

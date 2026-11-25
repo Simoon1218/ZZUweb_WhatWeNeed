@@ -17,6 +17,7 @@ from .session import UserSession, session_store
 from .zzu_client import (
     ZZUApiError,
     ZZUClient,
+    ZZUMFARequiredError,
     find_available_classroom,
     get_today_date_str,
     utc_plus_8,
@@ -35,6 +36,21 @@ app = FastAPI(
 # ------------------------------------------------------------------
 # Error Handling
 # ------------------------------------------------------------------
+@app.exception_handler(ZZUMFARequiredError)
+async def zzu_mfa_required_handler(
+    _request: Request, exc: ZZUMFARequiredError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.message,
+            "mfa_required": True,
+            "mfa_state": exc.mfa_state,
+            "mfa_data": exc.mfa_data,
+        },
+    )
+
+
 @app.exception_handler(ZZUApiError)
 async def zzu_api_error_handler(_request: Request, exc: ZZUApiError) -> JSONResponse:
     return JSONResponse(
@@ -50,6 +66,21 @@ class LoginRequest(BaseModel):
     account: str = Field(..., min_length=1, max_length=64, description="学号")
     password: str = Field("", max_length=128, description="移动校园密码")
     user_token: str = Field("", max_length=4096, description="可选：直接填入已有 UserToken")
+    mfa_state: str = Field("", max_length=512, description="可选：已完成二次验证的 mfaState")
+
+
+class MFASendRequest(BaseModel):
+    mfa_state: str = Field(..., min_length=1, max_length=512)
+    mfa_type: str = Field("securephone", max_length=64)
+
+
+class MFAVerifyRequest(BaseModel):
+    account: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1, max_length=128)
+    mfa_state: str = Field(..., min_length=1, max_length=512)
+    gid: str = Field("", max_length=256)
+    code: str = Field(..., min_length=1, max_length=32)
+    mfa_type: str = Field("securephone", max_length=64)
 
 
 class TransferRequest(BaseModel):
@@ -130,7 +161,11 @@ def login(payload: LoginRequest, request: Request, response: Response) -> dict[s
         if not payload.password:
             raise HTTPException(status_code=400, detail="请输入密码，或使用已有 UserToken 登录")
         client = ZZUClient()
-        user_token = client.login(account, payload.password)
+        user_token = client.login(
+            account,
+            payload.password,
+            mfa_state=payload.mfa_state,
+        )
 
     sess, signed_sid = session_store.create(
         account=account,
@@ -147,6 +182,49 @@ def login(payload: LoginRequest, request: Request, response: Response) -> dict[s
             # When logging in via pasted UserToken, fail fast if token is invalid
             session_store.delete(signed_sid)
             raise
+        warnings.append(f"教务令牌预获取失败（可稍后重试）：{exc.message}")
+
+    _set_session_cookie(response, request, signed_sid)
+    info = _session_info(sess)
+    if warnings:
+        info["warnings"] = warnings
+    return info
+
+
+@app.post("/api/auth/mfa/send")
+def send_mfa_code(payload: MFASendRequest) -> dict[str, Any]:
+    client = ZZUClient()
+    result = client.init_mfa_sms(mfa_state=payload.mfa_state, mfa_type=payload.mfa_type)
+    return {"ok": True, **result}
+
+
+@app.post("/api/auth/mfa/verify")
+def verify_mfa_and_login(
+    payload: MFAVerifyRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, Any]:
+    client = ZZUClient()
+    client.verify_mfa_code(
+        mfa_state=payload.mfa_state,
+        code=payload.code,
+        gid=payload.gid,
+        mfa_type=payload.mfa_type,
+    )
+    user_token = client.login(
+        payload.account.strip(),
+        payload.password,
+        mfa_state=payload.mfa_state,
+    )
+    sess, signed_sid = session_store.create(
+        account=payload.account.strip(),
+        user_token=user_token,
+        demo_mode=False,
+    )
+    warnings: list[str] = []
+    try:
+        ZZUClient(sess).get_jw_token()
+    except ZZUApiError as exc:
         warnings.append(f"教务令牌预获取失败（可稍后重试）：{exc.message}")
 
     _set_session_cookie(response, request, signed_sid)

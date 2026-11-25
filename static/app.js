@@ -31,6 +31,7 @@ const state = {
   timetable: [],
   grades: [],
   pendingTransfer: null,
+  mfa: { state: "", gid: "" },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -69,7 +70,10 @@ async function apiFetch(url, options = {}) {
   }
 
   if (!resp.ok) {
-    throw new Error((data && data.detail) || `请求失败 (${resp.status})`);
+    const err = new Error((data && data.detail) || `请求失败 (${resp.status})`);
+    err.status = resp.status;
+    err.payload = data;
+    throw err;
   }
 
   return data;
@@ -779,6 +783,7 @@ function initEvents() {
     const btn = $("login-submit-btn");
     btn.disabled = true;
     btn.textContent = "正在登录...";
+    $("mfa-box").classList.add("hidden");
     try {
       const payload = {
         account: $("login-account").value.trim(),
@@ -795,11 +800,82 @@ function initEvents() {
       }
       showAppView(user);
     } catch (err) {
+      if (err.payload && err.payload.mfa_required) {
+        state.mfa.state = err.payload.mfa_state || "";
+        state.mfa.gid = "";
+        $("mfa-message").textContent = err.message;
+        $("mfa-box").classList.remove("hidden");
+        $("mfa-sms-controls").classList.toggle("hidden", !state.mfa.state);
+      }
       showToast(err.message, "error");
     } finally {
       btn.disabled = false;
       btn.textContent = "登录进入校园站";
     }
+  });
+
+  // MFA SMS send
+  $("mfa-send-btn").addEventListener("click", async () => {
+    if (!state.mfa.state) {
+      showToast("缺少 MFA 状态令牌，请重新点击登录", "error");
+      return;
+    }
+    const btn = $("mfa-send-btn");
+    btn.disabled = true;
+    btn.textContent = "发送中...";
+    try {
+      const res = await apiFetch("/api/auth/mfa/send", {
+        method: "POST",
+        body: JSON.stringify({ mfa_state: state.mfa.state, mfa_type: "securephone" }),
+      });
+      state.mfa.gid = res.gid || "";
+      showToast("已请求发送短信验证码，请查收手机短信", "success");
+    } catch (err) {
+      showToast(`发送验证码失败：${err.message}`, "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "发送验证码";
+    }
+  });
+
+  // MFA SMS verify & login
+  $("mfa-verify-btn").addEventListener("click", async () => {
+    const code = $("mfa-code").value.trim();
+    if (!code) {
+      showToast("请输入短信验证码", "error");
+      return;
+    }
+    const btn = $("mfa-verify-btn");
+    btn.disabled = true;
+    btn.textContent = "验证中...";
+    try {
+      const user = await apiFetch("/api/auth/mfa/verify", {
+        method: "POST",
+        body: JSON.stringify({
+          account: $("login-account").value.trim(),
+          password: $("login-password").value,
+          mfa_state: state.mfa.state,
+          gid: state.mfa.gid,
+          code,
+          mfa_type: "securephone",
+        }),
+      });
+      $("mfa-box").classList.add("hidden");
+      showToast("二次验证通过，登录成功", "success");
+      showAppView(user);
+    } catch (err) {
+      showToast(`验证失败：${err.message}`, "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "验证并完成登录";
+    }
+  });
+
+  // Switch to UserToken tab from MFA box
+  $("mfa-switch-token-btn").addEventListener("click", () => {
+    const tokenTab = document.querySelector('.mode-tab[data-login-mode="token"]');
+    if (tokenTab) tokenTab.click();
+    $("mfa-box").classList.add("hidden");
   });
 
   // Demo login
