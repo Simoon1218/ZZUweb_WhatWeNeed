@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: zzuweb-whatweneed
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SESSION_TTL_HOURS
+        value: "24"
+      - key: REQUEST_TIMEOUT
+        value: "15"
+      - key: UPSTREAM_PROXY
+        sync: false

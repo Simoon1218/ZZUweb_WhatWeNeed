@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>ZZU WhatWeNeed · 郑州大学校园生活站</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- 登录视图 -->
+  <section id="login-view" class="login-view">
+    <div class="login-card">
+      <div class="brand-header">
+        <div class="brand-badge">ZZU</div>
+        <div>
+          <h1>ZZU WhatWeNeed</h1>
+          <p class="subtitle">郑州大学移动校园一站式网页端</p>
+        </div>
+      </div>
+
+      <div class="login-mode-tabs" role="tablist">
+        <button type="button" class="mode-tab active" data-login-mode="password">学号密码登录</button>
+        <button type="button" class="mode-tab" data-login-mode="token">UserToken 登录</button>
+      </div>
+
+      <form id="login-form" class="login-form">
+        <label class="field">
+          <span>学号</span>
+          <input id="login-account" name="account" type="text" placeholder="请输入郑州大学学号" autocomplete="username" required />
+        </label>
+
+        <label class="field" id="password-field">
+          <span>密码</span>
+          <input id="login-password" name="password" type="password" placeholder="移动校园 APP 登录密码" autocomplete="current-password" />
+        </label>
+
+        <label class="field hidden" id="token-field">
+          <span>UserToken</span>
+          <textarea id="login-token" name="user_token" rows="3" placeholder="粘贴已获取的 idToken / UserToken"></textarea>
+        </label>
+
+        <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">登录进入校园站</button>
+      </form>
+
+      <div class="divider"><span>或者</span></div>
+
+      <button type="button" id="demo-login-btn" class="btn btn-secondary btn-block">
+        演示模式体验（无需学号密码）
+      </button>
+
+      <div class="login-footnote">
+        <p>基于开源项目 <a href="https://github.com/TorCroft/ZZU-API" target="_blank" rel="noopener">TorCroft/ZZU-API</a> 整合构建。</p>
+        <p>密码仅用于向郑州大学官方认证接口换取会话令牌，服务端不持久化保存明文密码。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 主应用视图 -->
+  <div id="app-shell" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-badge small">ZZU</div>
+        <div>
+          <div class="brand-title">WhatWeNeed</div>
+          <div class="brand-sub">郑州大学校园站</div>
+        </div>
+      </div>
+
+      <nav class="nav-list" id="nav-list">
+        <button type="button" class="nav-item active" data-tab="dashboard">
+          <span class="nav-icon">🏠</span><span>校园概览</span>
+        </button>
+        <button type="button" class="nav-item" data-tab="classrooms">
+          <span class="nav-icon">🏫</span><span>空教室查询</span>
+        </button>
+        <button type="button" class="nav-item" data-tab="courses">
+          <span class="nav-icon">📅</span><span>个人课表</span>
+        </button>
+        <button type="button" class="nav-item" data-tab="grades">
+          <span class="nav-icon">📊</span><span>成绩查询</span>
+        </button>
+        <button type="button" class="nav-item" data-tab="exams">
+          <span class="nav-icon">📝</span><span>期末考试</span>
+        </button>
+        <button type="button" class="nav-item" data-tab="ecard">
+          <span class="nav-icon">💳</span><span>校园卡与电费</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-chip">
+          <div class="user-account" id="sidebar-account">--</div>
+          <div class="user-mode" id="sidebar-mode">已登录</div>
+        </div>
+        <div class="sidebar-actions">
+          <button type="button" id="theme-toggle-btn" class="btn btn-ghost btn-sm" title="切换深浅色主题">🌓 主题</button>
+          <button type="button" id="logout-btn" class="btn btn-ghost btn-sm danger-text">退出</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <h2 id="page-title">校园概览</h2>
+          <p id="page-desc" class="muted">欢迎回来，一站查看课表、空教室、成绩、考试与校园卡</p>
+        </div>
+        <div class="topbar-right">
+          <span id="demo-badge" class="badge badge-warn hidden">演示模式</span>
+          <span id="today-badge" class="badge badge-neutral"></span>
+        </div>
+      </header>
+
+      <!-- 1. 校园概览 -->
+      <section class="tab-panel active" id="panel-dashboard">
+        <div class="stats-grid">
+          <div class="stat-card accent">
+            <div class="stat-label">校园卡余额</div>
+            <div class="stat-value" id="dash-card-balance">--</div>
+            <div class="stat-sub" id="dash-card-user">点击刷新获取实时余额</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">宿舍剩余电量</div>
+            <div class="stat-value" id="dash-electric-balance">--</div>
+            <div class="stat-sub" id="dash-dorm-loc">自动读取绑定宿舍</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">本周课程数</div>
+            <div class="stat-value" id="dash-course-count">--</div>
+            <div class="stat-sub" id="dash-semester-name">当前学期</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">待考科目</div>
+            <div class="stat-value" id="dash-exam-count">--</div>
+            <div class="stat-sub">当前学期考试安排</div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="card">
+            <div class="card-header">
+              <h3>快捷入口</h3>
+              <button type="button" id="dash-refresh-btn" class="btn btn-secondary btn-sm">刷新全部</button>
+            </div>
+            <div class="quick-actions">
+              <button type="button" class="quick-btn" data-jump="classrooms">🏫 找空教室自习</button>
+              <button type="button" class="quick-btn" data-jump="courses">📅 查看本周课表</button>
+              <button type="button" class="quick-btn" data-jump="grades">📊 查历年成绩</button>
+              <button type="button" class="quick-btn" data-jump="exams">📝 查期末考试</button>
+              <button type="button" class="quick-btn" data-jump="ecard">💳 余额与卡转账</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>近期考试提醒</h3>
+              <button type="button" class="btn btn-ghost btn-sm" data-jump="exams">查看全部 →</button>
+            </div>
+            <div id="dash-exams-preview" class="preview-list muted">正在加载...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. 空教室查询 -->
+      <section class="tab-panel" id="panel-classrooms">
+        <div class="card">
+          <div class="card-header">
+            <h3>空教室筛选</h3>
+            <button type="button" id="reload-campuses-btn" class="btn btn-ghost btn-sm">刷新教学楼列表</button>
+          </div>
+          <div class="filter-grid">
+            <label class="field">
+              <span>校区</span>
+              <select id="cr-campus"></select>
+            </label>
+            <label class="field">
+              <span>教学楼</span>
+              <select id="cr-building"></select>
+            </label>
+            <label class="field">
+              <span>日期</span>
+              <input id="cr-date" type="date" />
+            </label>
+            <label class="field">
+              <span>楼层（可选）</span>
+              <select id="cr-floor">
+                <option value="">全部楼层</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="period-selector">
+            <div class="period-header">
+              <span class="field-label">目标空闲节次（多选，留空则显示该楼全部教室占用情况）</span>
+              <div class="preset-btns">
+                <button type="button" class="chip-btn" data-periods="1,2,3,4">上午(1-4)</button>
+                <button type="button" class="chip-btn" data-periods="5,6,7,8">下午(5-8)</button>
+                <button type="button" class="chip-btn" data-periods="9,10">晚上(9-10)</button>
+                <button type="button" class="chip-btn" data-periods="">清空</button>
+              </div>
+            </div>
+            <div class="period-pills" id="cr-periods"></div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" id="cr-search-btn" class="btn btn-primary">查询空教室</button>
+            <span id="cr-summary" class="muted"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3>查询结果</h3>
+            <div class="legend">
+              <span class="legend-item"><i class="dot free"></i>空闲</span>
+              <span class="legend-item"><i class="dot busy"></i>占用</span>
+            </div>
+          </div>
+          <div id="cr-results" class="rooms-grid">
+            <div class="empty-state">选择教学楼与节次后点击「查询空教室」</div>
+          </div>
+          <details class="raw-details">
+            <summary>查看原始接口数据 (JSON)</summary>
+            <pre id="cr-raw"></pre>
+          </details>
+        </div>
+      </section>
+
+      <!-- 3. 个人课表 -->
+      <section class="tab-panel" id="panel-courses">
+        <div class="card">
+          <div class="toolbar">
+            <label class="field inline">
+              <span>学期</span>
+              <select id="course-semester"></select>
+            </label>
+            <div class="week-controls">
+              <button type="button" id="week-prev-btn" class="btn btn-secondary btn-sm">← 上一周</button>
+              <button type="button" id="week-today-btn" class="btn btn-secondary btn-sm">本周</button>
+              <button type="button" id="week-next-btn" class="btn btn-secondary btn-sm">下一周 →</button>
+            </div>
+            <span id="course-date-range" class="badge badge-neutral"></span>
+            <button type="button" id="course-load-btn" class="btn btn-primary btn-sm">加载课表</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div id="course-grid-wrap" class="timetable-wrap">
+            <div class="empty-state">正在准备课表...</div>
+          </div>
+          <details class="raw-details">
+            <summary>查看原始接口数据 (JSON)</summary>
+            <pre id="course-raw"></pre>
+          </details>
+        </div>
+      </section>
+
+      <!-- 4. 成绩查询 -->
+      <section class="tab-panel" id="panel-grades">
+        <div class="stats-grid compact">
+          <div class="stat-card">
+            <div class="stat-label">课程总数</div>
+            <div class="stat-value" id="grade-stat-count">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">累计学分</div>
+            <div class="stat-value" id="grade-stat-credits">--</div>
+          </div>
+          <div class="stat-card accent">
+            <div class="stat-label">加权平均绩点 (参考)</div>
+            <div class="stat-value" id="grade-stat-gpa">--</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="toolbar">
+            <label class="field inline">
+              <span>学期筛选</span>
+              <select id="grade-semester-filter">
+                <option value="">全部学期</option>
+              </select>
+            </label>
+            <label class="field inline grow">
+              <span>搜索课程</span>
+              <input id="grade-search" type="search" placeholder="输入课程名或课程代码..." />
+            </label>
+            <button type="button" id="grade-refresh-btn" class="btn btn-primary btn-sm">刷新成绩</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>学期</th>
+                  <th>课程名称</th>
+                  <th>类别</th>
+                  <th>学分</th>
+                  <th>成绩</th>
+                  <th>绩点</th>
+                </tr>
+              </thead>
+              <tbody id="grades-tbody">
+                <tr><td colspan="6" class="empty-cell">点击「刷新成绩」加载</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <details class="raw-details">
+            <summary>查看原始接口数据 (JSON)</summary>
+            <pre id="grades-raw"></pre>
+          </details>
+        </div>
+      </section>
+
+      <!-- 5. 期末考试 -->
+      <section class="tab-panel" id="panel-exams">
+        <div class="card">
+          <div class="toolbar">
+            <label class="field inline">
+              <span>学期</span>
+              <select id="exam-semester"></select>
+            </label>
+            <button type="button" id="exam-load-btn" class="btn btn-primary btn-sm">查询考试安排</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div id="exams-list" class="exams-grid">
+            <div class="empty-state">选择学期后点击「查询考试安排」</div>
+          </div>
+          <details class="raw-details">
+            <summary>查看原始接口数据 (JSON)</summary>
+            <pre id="exams-raw"></pre>
+          </details>
+        </div>
+      </section>
+
+      <!-- 6. 校园卡与电费 -->
+      <section class="tab-panel" id="panel-ecard">
+        <div class="stats-grid compact">
+          <div class="stat-card accent">
+            <div class="stat-label">校园卡余额 (CNY)</div>
+            <div class="stat-value" id="ecard-balance">--</div>
+            <div class="stat-sub" id="ecard-owner">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">宿舍剩余电费/电量</div>
+            <div class="stat-value" id="ecard-electric">--</div>
+            <div class="stat-sub" id="ecard-dorm">--</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">凭证操作</div>
+            <div class="stat-actions">
+              <button type="button" id="ecard-refresh-btn" class="btn btn-primary btn-sm">刷新余额</button>
+              <button type="button" id="ecard-force-refresh-btn" class="btn btn-secondary btn-sm">强制刷新 Token</button>
+            </div>
+            <div class="stat-sub">ECardAccessToken 有效期约 1 小时</div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="card">
+            <div class="card-header">
+              <h3>校园卡详情项</h3>
+            </div>
+            <div id="ecard-templates" class="kv-list">
+              <div class="empty-state">点击「刷新余额」获取详情</div>
+            </div>
+            <div class="notice-box">
+              <strong>关于电费充值：</strong>根据上游 <code>TorCroft/ZZU-API</code> 说明，宿舍电费充值请求体采用 RSA 加密，暂无私钥解密，因此本页面仅提供余额查询与卡对卡转账功能。
+            </div>
+            <details class="raw-details">
+              <summary>查看原始接口数据 (JSON)</summary>
+              <pre id="ecard-raw"></pre>
+            </details>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>卡对卡转账 (C2C)</h3>
+            </div>
+            <form id="transfer-form" class="stack-form">
+              <label class="field">
+                <span>付款人学号</span>
+                <input id="tx-from" type="text" placeholder="默认当前登录学号" required />
+              </label>
+              <label class="field">
+                <span>收款人学号</span>
+                <input id="tx-to" type="text" placeholder="请输入收款方学号" required />
+              </label>
+              <label class="field">
+                <span>转账金额（元）</span>
+                <input id="tx-amount" type="number" step="0.01" min="0.01" max="5000" placeholder="例如 10" required />
+              </label>
+              <label class="field">
+                <span>校园卡密码</span>
+                <input id="tx-password" type="password" placeholder="通常为身份证后六位（不会保存）" required />
+              </label>
+              <button type="submit" class="btn btn-primary">发起转账</button>
+            </form>
+            <div id="transfer-result" class="muted"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 移动端底部导航 -->
+    <nav class="mobile-nav" id="mobile-nav">
+      <button type="button" class="mnav-item active" data-tab="dashboard">🏠<span>概览</span></button>
+      <button type="button" class="mnav-item" data-tab="classrooms">🏫<span>空教室</span></button>
+      <button type="button" class="mnav-item" data-tab="courses">📅<span>课表</span></button>
+      <button type="button" class="mnav-item" data-tab="grades">📊<span>成绩</span></button>
+      <button type="button" class="mnav-item" data-tab="exams">📝<span>考试</span></button>
+      <button type="button" class="mnav-item" data-tab="ecard">💳<span>校园卡</span></button>
+    </nav>
+  </div>
+
+  <!-- 转账二次确认弹窗 -->
+  <div id="confirm-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <h3>确认校园卡转账</h3>
+      <p id="confirm-modal-text" class="muted"></p>
+      <div class="modal-actions">
+        <button type="button" id="confirm-cancel-btn" class="btn btn-secondary">取消</button>
+        <button type="button" id="confirm-ok-btn" class="btn btn-primary">确认转账</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
